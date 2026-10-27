@@ -99,13 +99,13 @@ export class NativeWindowService extends EventEmitter {
     return this.snapshot
   }
 
-  async activateWindow(hwnd: string): Promise<boolean> {
+  async activateWindow(hwnd: string, moveToPrimary = false): Promise<boolean> {
     if (!/^\d+$/.test(hwnd) || !this.helperPath) return false
 
     // Spawn at the moment of the user gesture. Windows permits a process that
     // was started by the current foreground process to request foreground focus.
     return new Promise((resolve) => {
-      const activator = spawn(this.helperPath!, ['--activate', hwnd], {
+      const activator = spawn(this.helperPath!, [moveToPrimary ? '--move-primary' : '--activate', hwnd], {
         windowsHide: true,
         stdio: 'ignore'
       })
@@ -129,6 +129,12 @@ export class NativeWindowService extends EventEmitter {
   async restoreWindow(hwnd: string): Promise<boolean> {
     if (!/^\d+$/.test(hwnd)) return false
     const message = await this.request('RESTORE', hwnd)
+    return message.type === 'result' && message.ok
+  }
+
+  async closeWindow(hwnd: string): Promise<boolean> {
+    if (!/^\d+$/.test(hwnd)) return false
+    const message = await this.request('CLOSE', hwnd)
     return message.type === 'result' && message.ok
   }
 

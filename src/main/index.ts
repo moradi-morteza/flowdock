@@ -117,16 +117,19 @@ app.whenReady().then(() => {
 
 windows.on('snapshot', (snapshot) => {
   dock?.webContents.send('flowdock:snapshot', snapshot)
-  keepDockAboveWindows()
 })
 windows.on('error', () => undefined)
 
 ipcMain.handle('flowdock:get-snapshot', () => windows.getSnapshot())
-ipcMain.handle('flowdock:activate', async (_, hwnd: unknown) => {
+ipcMain.handle('flowdock:activate', async (_, hwnd: unknown, moveToPrimary: unknown) => {
   if (typeof hwnd !== 'string') return false
-  const activated = await windows.activateWindow(hwnd)
+  const activated = await windows.activateWindow(hwnd, moveToPrimary === true)
   if (activated) keepDockAboveWindows()
   return activated
+})
+ipcMain.handle('flowdock:close-window', (_, hwnd: unknown) => {
+  if (typeof hwnd !== 'string') return false
+  return windows.closeWindow(hwnd)
 })
 ipcMain.handle('flowdock:hide', hideDock)
 ipcMain.handle('flowdock:set-width', (_, requestedWidth: unknown) => {

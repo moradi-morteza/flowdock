@@ -8,6 +8,7 @@ FlowDock is a Windows 10/11 desktop sidebar for finding and activating real top-
 - Event-driven Win32 enumeration via `EnumWindows` and `SetWinEventHook`
 - Real window activation via `ShowWindowAsync(SW_RESTORE)` and `SetForegroundWindow`
 - Per-window title, executable/process name, icon, minimized state, and active indicator
+- Per-window monitor badges; Shift+Click or Shift+Enter moves a window to the primary monitor
 - App grouping, collapsible groups, full-title tooltips, search, and compact dark UI
 - Global `Ctrl+Alt+Space` show/hide shortcut
 - `Up` / `Down`, `Enter`, and `Escape` keyboard controls while the sidebar is active
@@ -72,13 +73,23 @@ Create an unpacked test build:
 npm run pack:win
 ```
 
-Create the NSIS installer:
+Create both the NSIS installer and portable executable:
 
 ```powershell
 npm run build:win
 ```
 
-Artifacts are written to `release/`. The installer is named `FlowDock-0.1.0-x64-Setup.exe`.
+Artifacts are written to `release/`:
+
+- `FlowDock-1.0.0-x64-Setup.exe`
+- `FlowDock-1.0.0-x64-Portable.exe`
+
+Build only one target when needed:
+
+```powershell
+npm run build:win:installer
+npm run build:win:portable
+```
 
 ## Architecture
 
@@ -96,4 +107,4 @@ The helper remains independent of the UI. It owns WinEvent hooks and enumeration
 
 ## Native protocol
 
-Commands on standard input are `LIST <id>`, `ACTIVATE <id> <hwnd>`, `RESTORE <id> <hwnd>`, and `QUIT <id>`. Responses are one-line JSON objects. Window handles are decimal strings so 64-bit HWND values are never truncated by JavaScript number conversion.
+Commands on standard input include `LIST <id>`, `ACTIVATE <id> <hwnd>`, `RESTORE <id> <hwnd>`, `CLOSE <id> <hwnd>`, and `QUIT <id>`. Responses are one-line JSON objects. Window handles are decimal strings so 64-bit HWND values are never truncated by JavaScript number conversion.

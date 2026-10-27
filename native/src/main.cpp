@@ -27,6 +27,8 @@ struct WindowInfo {
   std::wstring processName;
   std::wstring executablePath;
   bool minimized{};
+  std::wstring monitorDevice;
+  bool primaryMonitor{};
 };
 
 struct Command {
@@ -133,6 +135,14 @@ BOOL CALLBACK enumerateCallback(HWND hwnd, LPARAM parameter) {
   readProcessInfo(info.processId, info.processName, info.executablePath);
   if (info.processName.empty()) info.processName = L"Unknown";
   info.minimized = IsIconic(hwnd) != FALSE;
+  const HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+  MONITORINFOEXW monitorInfo{};
+  monitorInfo.cbSize = sizeof(monitorInfo);
+  if (monitor != nullptr && GetMonitorInfoW(
+          monitor, reinterpret_cast<MONITORINFO*>(&monitorInfo))) {
+    info.monitorDevice = monitorInfo.szDevice;
+    info.primaryMonitor = (monitorInfo.dwFlags & MONITORINFOF_PRIMARY) != 0;
+  }
   windows.push_back(std::move(info));
   return TRUE;
 }
@@ -171,7 +181,9 @@ void emitSnapshot(const std::string& requestId = {}) {
          << "\",\"processId\":" << window.processId
          << ",\"processName\":\"" << escapeJson(toUtf8(window.processName))
          << "\",\"executablePath\":\"" << escapeJson(toUtf8(window.executablePath))
-         << "\",\"minimized\":" << (window.minimized ? "true" : "false") << '}';
+         << "\",\"minimized\":" << (window.minimized ? "true" : "false")
+         << ",\"monitorDevice\":\"" << escapeJson(toUtf8(window.monitorDevice))
+         << "\",\"primaryMonitor\":" << (window.primaryMonitor ? "true" : "false") << '}';
   }
   json << "]}";
   writeLine(json.str());
@@ -189,6 +201,61 @@ bool activateWindow(HWND hwnd) {
   if (!IsWindow(hwnd)) return false;
   if (IsIconic(hwnd)) ShowWindowAsync(hwnd, SW_RESTORE);
   // SetForegroundWindow intentionally respects Windows' foreground-lock policy.
+  return SetForegroundWindow(hwnd) != FALSE;
+}
+
+BOOL CALLBACK findPrimaryMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM parameter) {
+  MONITORINFO info{};
+  info.cbSize = sizeof(info);
+  if (GetMonitorInfoW(monitor, &info) && (info.dwFlags & MONITORINFOF_PRIMARY) != 0) {
+    *reinterpret_cast<HMONITOR*>(parameter) = monitor;
+    return FALSE;
+  }
+  return TRUE;
+}
+
+bool moveWindowToPrimary(HWND hwnd) {
+  if (!IsWindow(hwnd)) return false;
+
+  HMONITOR primaryMonitor = nullptr;
+  EnumDisplayMonitors(nullptr, nullptr, findPrimaryMonitor, reinterpret_cast<LPARAM>(&primaryMonitor));
+  if (primaryMonitor == nullptr) return false;
+
+  const bool wasMaximized = IsZoomed(hwnd) != FALSE;
+  if (IsIconic(hwnd) || wasMaximized) {
+    ShowWindowAsync(hwnd, SW_RESTORE);
+    for (int attempt = 0; attempt < 15 && (IsIconic(hwnd) || IsZoomed(hwnd)); ++attempt) Sleep(10);
+  }
+
+  const HMONITOR sourceMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+  if (sourceMonitor != primaryMonitor) {
+    MONITORINFO sourceInfo{};
+    MONITORINFO primaryInfo{};
+    sourceInfo.cbSize = sizeof(sourceInfo);
+    primaryInfo.cbSize = sizeof(primaryInfo);
+    RECT windowRect{};
+    if (!GetMonitorInfoW(sourceMonitor, &sourceInfo) ||
+        !GetMonitorInfoW(primaryMonitor, &primaryInfo) ||
+        !GetWindowRect(hwnd, &windowRect)) return false;
+
+    const LONG sourceWidth = std::max<LONG>(1, sourceInfo.rcWork.right - sourceInfo.rcWork.left);
+    const LONG sourceHeight = std::max<LONG>(1, sourceInfo.rcWork.bottom - sourceInfo.rcWork.top);
+    const LONG targetWidth = primaryInfo.rcWork.right - primaryInfo.rcWork.left;
+    const LONG targetHeight = primaryInfo.rcWork.bottom - primaryInfo.rcWork.top;
+    const LONG windowWidth = std::min<LONG>(windowRect.right - windowRect.left, targetWidth);
+    const LONG windowHeight = std::min<LONG>(windowRect.bottom - windowRect.top, targetHeight);
+    const double relativeX = std::clamp(
+        static_cast<double>(windowRect.left - sourceInfo.rcWork.left) / sourceWidth, 0.0, 1.0);
+    const double relativeY = std::clamp(
+        static_cast<double>(windowRect.top - sourceInfo.rcWork.top) / sourceHeight, 0.0, 1.0);
+    const LONG x = primaryInfo.rcWork.left + static_cast<LONG>(relativeX * std::max<LONG>(0, targetWidth - windowWidth));
+    const LONG y = primaryInfo.rcWork.top + static_cast<LONG>(relativeY * std::max<LONG>(0, targetHeight - windowHeight));
+
+    if (!SetWindowPos(hwnd, nullptr, x, y, windowWidth, windowHeight,
+                      SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER)) return false;
+  }
+
+  if (wasMaximized) ShowWindowAsync(hwnd, SW_MAXIMIZE);
   return SetForegroundWindow(hwnd) != FALSE;
 }
 
@@ -250,11 +317,13 @@ void processCommand(Command* rawCommand) {
     emitSnapshot(command->requestId);
     return;
   }
-  if (command->verb == "ACTIVATE" || command->verb == "RESTORE") {
+  if (command->verb == "ACTIVATE" || command->verb == "RESTORE" || command->verb == "CLOSE") {
     HWND hwnd = nullptr;
     bool ok = parseHwnd(command->argument, hwnd);
     if (ok) {
-      if (command->verb == "RESTORE") {
+      if (command->verb == "CLOSE") {
+        ok = PostMessageW(hwnd, WM_CLOSE, 0, 0) != FALSE;
+      } else if (command->verb == "RESTORE") {
         ok = ShowWindowAsync(hwnd, SW_RESTORE) != FALSE;
       } else {
         ok = activateWindow(hwnd);
@@ -315,6 +384,11 @@ int main(int argc, char* argv[]) {
     HWND hwnd = nullptr;
     if (!parseHwnd(argv[2], hwnd)) return 2;
     return activateWindow(hwnd) ? 0 : 3;
+  }
+  if (argc == 3 && std::string_view(argv[1]) == "--move-primary") {
+    HWND hwnd = nullptr;
+    if (!parseHwnd(argv[2], hwnd)) return 2;
+    return moveWindowToPrimary(hwnd) ? 0 : 3;
   }
 
   g_mainThreadId = GetCurrentThreadId();

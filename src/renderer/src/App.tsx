@@ -4,7 +4,6 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
-  GripVertical,
   Layers3,
   Search,
   X
@@ -28,6 +27,11 @@ const friendlyProcessNames: Record<string, string> = {
 
 function displayProcessName(processName: string): string {
   return friendlyProcessNames[processName.toLocaleLowerCase()] ?? processName
+}
+
+function displayMonitorName(device: string): string {
+  const match = device.match(/DISPLAY(\d+)$/i)
+  return match ? `M${match[1]}` : 'M?'
 }
 
 const emptySnapshot: WindowSnapshot = { windows: [], activeHwnd: null, error: null }
@@ -98,13 +102,23 @@ export default function App(): React.JSX.Element {
     }
   }, [selectedHwnd, snapshot.activeHwnd, visibleWindows])
 
-  const activate = useCallback(async (hwnd: string) => {
+  const activate = useCallback(async (hwnd: string, moveToPrimary = false) => {
     setActivationError(null)
     try {
-      const activated = await window.flowDock.activateWindow(hwnd)
+      const activated = await window.flowDock.activateWindow(hwnd, moveToPrimary)
       if (!activated) setActivationError('Windows prevented this app from taking foreground focus.')
     } catch (error) {
       setActivationError(error instanceof Error ? error.message : 'Window activation failed.')
+    }
+  }, [])
+
+  const closeWindow = useCallback(async (hwnd: string) => {
+    setActivationError(null)
+    try {
+      const closeRequested = await window.flowDock.closeWindow(hwnd)
+      if (!closeRequested) setActivationError('The window could not be closed.')
+    } catch (error) {
+      setActivationError(error instanceof Error ? error.message : 'Window close failed.')
     }
   }, [])
 
@@ -119,7 +133,7 @@ export default function App(): React.JSX.Element {
       if (visibleWindows.length === 0) return
       event.preventDefault()
       if (event.key === 'Enter') {
-        if (selectedHwnd) void activate(selectedHwnd)
+        if (selectedHwnd) void activate(selectedHwnd, event.shiftKey)
         return
       }
       const currentIndex = visibleWindows.findIndex((item) => item.hwnd === selectedHwnd)
@@ -241,28 +255,53 @@ export default function App(): React.JSX.Element {
                   const isActive = desktopWindow.hwnd === snapshot.activeHwnd
                   const isSelected = desktopWindow.hwnd === selectedHwnd
                   return (
-                    <button
-                      type="button"
+                    <div
                       key={desktopWindow.hwnd}
                       title={desktopWindow.title}
                       onMouseEnter={() => setSelectedHwnd(desktopWindow.hwnd)}
-                      onClick={() => void activate(desktopWindow.hwnd)}
-                      className={`group/window relative mb-0.5 flex min-h-11 w-full items-center gap-2.5 rounded-lg border px-2.5 py-1.5 text-left transition-all duration-150 focus:outline-none ${
+                      className={`group/window relative mb-0.5 flex min-h-11 w-full items-center rounded-lg border text-left transition-all duration-150 ${
                         isSelected
                           ? 'border-white/10 bg-white/[0.075] text-white'
                           : 'border-transparent text-slate-400 hover:bg-white/[0.04] hover:text-slate-200'
                       }`}
                     >
                       {isActive && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]" />}
-                      <WindowIcon window={desktopWindow} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[12px] font-medium leading-4">{desktopWindow.title}</span>
-                        <span className="mt-0.5 block truncate text-[9px] leading-3 text-slate-600">
-                          {desktopWindow.minimized ? 'Minimized · ' : ''}{desktopWindow.processName}
+                      <button
+                        type="button"
+                        title={`${desktopWindow.title}\nShift+Click: move to primary monitor`}
+                        onClick={(event) => void activate(desktopWindow.hwnd, event.shiftKey)}
+                        className="flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2.5 text-left focus:outline-none"
+                      >
+                        <WindowIcon window={desktopWindow} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[12px] font-medium leading-4">{desktopWindow.title}</span>
+                          <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[9px] leading-3 text-slate-600">
+                            <span className="min-w-0 flex-1 truncate">
+                              {desktopWindow.minimized ? 'Minimized · ' : ''}{desktopWindow.processName}
+                            </span>
+                            <span
+                              title={desktopWindow.primaryMonitor ? 'Primary monitor' : desktopWindow.monitorDevice}
+                              className={`shrink-0 rounded px-1 py-px font-mono text-[8px] ${
+                                desktopWindow.primaryMonitor
+                                  ? 'bg-cyan-400/10 text-cyan-400/80'
+                                  : 'bg-white/[0.05] text-slate-600'
+                              }`}
+                            >
+                              {displayMonitorName(desktopWindow.monitorDevice)}{desktopWindow.primaryMonitor ? '·P' : ''}
+                            </span>
+                          </span>
                         </span>
-                      </span>
-                      <GripVertical className="size-3 shrink-0 text-transparent transition group-hover/window:text-slate-700" />
-                    </button>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Close ${desktopWindow.title}`}
+                        title={`Close ${desktopWindow.title}`}
+                        onClick={() => void closeWindow(desktopWindow.hwnd)}
+                        className="mr-1 grid size-7 shrink-0 place-items-center rounded-md text-slate-700 transition hover:bg-red-400/10 hover:text-red-300 focus-visible:text-red-300 focus-visible:outline focus-visible:outline-1 focus-visible:outline-red-400/60 group-hover/window:text-slate-500"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
                   )
                 })}
               </div>
@@ -280,7 +319,7 @@ export default function App(): React.JSX.Element {
 
         <footer className="flex h-8 shrink-0 items-center justify-between border-t border-white/[0.06] px-3 text-[9px] text-slate-600">
           <span><kbd>↑</kbd> <kbd>↓</kbd> navigate</span>
-          <span><kbd>Enter</kbd> switch</span>
+          <span title="Shift+Enter also moves the selected window"><kbd>⇧</kbd> click → primary</span>
         </footer>
       </div>
     </main>

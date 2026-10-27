@@ -6,6 +6,8 @@ export interface DesktopWindow {
   executablePath: string
   iconDataUrl: string | null
   minimized: boolean
+  monitorDevice: string
+  primaryMonitor: boolean
 }
 
 export interface WindowSnapshot {
@@ -16,7 +18,8 @@ export interface WindowSnapshot {
 
 export interface FlowDockApi {
   getSnapshot(): Promise<WindowSnapshot>
-  activateWindow(hwnd: string): Promise<boolean>
+  activateWindow(hwnd: string, moveToPrimary?: boolean): Promise<boolean>
+  closeWindow(hwnd: string): Promise<boolean>
   hide(): Promise<void>
   setWidth(width: number): Promise<number>
   onSnapshot(listener: (snapshot: WindowSnapshot) => void): () => void

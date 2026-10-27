@@ -1,6 +1,6 @@
 {
   "name": "flowdock",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A fast, native Windows window switcher sidebar",
   "main": "out/main/index.js",
   "author": "FlowDock contributors",
@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "build": "npm run typecheck && electron-vite build",
     "build:native": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-native.ps1",
-    "build:win": "npm run build:native && npm run build && electron-builder --win nsis",
+    "build:win": "npm run build:native && npm run build && electron-builder --win",
+    "build:win:installer": "npm run build:native && npm run build && electron-builder --win nsis",
+    "build:win:portable": "npm run build:native && npm run build && electron-builder --win portable",
     "pack:win": "npm run build:native && npm run build && electron-builder --win dir"
   },
   "dependencies": {
@@ -55,15 +57,22 @@
         {
           "target": "nsis",
           "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
         }
-      ],
-      "artifactName": "FlowDock-${version}-${arch}-Setup.${ext}"
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "artifactName": "FlowDock-${version}-${arch}-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "FlowDock-${version}-${arch}-Portable.${ext}"
     }
   }
 }
