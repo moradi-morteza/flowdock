@@ -143,17 +143,29 @@ export default function App(): React.JSX.Element {
 
   const startResize = (event: React.PointerEvent): void => {
     event.currentTarget.setPointerCapture(event.pointerId)
-    const startX = event.clientX
+    const startX = event.screenX
     const startWidth = window.innerWidth
+    let pendingWidth = startWidth
+    let animationFrame: number | null = null
+
+    const commit = (): void => {
+      animationFrame = null
+      void window.flowDock.setWidth(pendingWidth)
+    }
     const move = (moveEvent: PointerEvent): void => {
-      void window.flowDock.setWidth(startWidth + startX - moveEvent.clientX)
+      pendingWidth = startWidth + startX - moveEvent.screenX
+      if (animationFrame === null) animationFrame = window.requestAnimationFrame(commit)
     }
     const stop = (): void => {
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame)
+      void window.flowDock.setWidth(pendingWidth)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
   }
 
   return (

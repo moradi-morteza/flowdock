@@ -62,7 +62,7 @@ function createDock(): void {
     show: false,
     frame: false,
     transparent: true,
-    resizable: true,
+    resizable: false,
     movable: false,
     minimizable: false,
     maximizable: false,
@@ -91,12 +91,6 @@ function createDock(): void {
       hideDock()
     }
   })
-  dock.on('resize', () => {
-    if (!dock) return
-    dockWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, dock.getBounds().width))
-    positionDock()
-  })
-
   if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
     void dock.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
