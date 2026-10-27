@@ -157,7 +157,7 @@ export default function App(): React.JSX.Element {
   }
 
   return (
-    <main className="relative flex h-screen min-w-0 overflow-hidden rounded-l-2xl border border-r-0 border-white/10 bg-[#0b0e14]/[0.97] text-slate-200 shadow-dock backdrop-blur-xl">
+    <main className="relative flex h-screen min-w-0 overflow-hidden border border-r-0 border-white/10 bg-[#0b0e14]/[0.97] text-slate-200 shadow-dock backdrop-blur-xl">
       <button
         type="button"
         aria-label="Resize sidebar"

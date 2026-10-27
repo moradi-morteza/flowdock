@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <dwmapi.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <atomic>
@@ -38,6 +39,7 @@ DWORD g_mainThreadId = 0;
 std::mutex g_outputMutex;
 std::atomic<bool> g_running{true};
 UINT_PTR g_refreshTimer = 0;
+HWND g_appBarHwnd = nullptr;
 
 std::string toUtf8(const std::wstring& value) {
   if (value.empty()) return {};
@@ -190,6 +192,53 @@ bool activateWindow(HWND hwnd) {
   return SetForegroundWindow(hwnd) != FALSE;
 }
 
+void removeAppBar() {
+  if (g_appBarHwnd == nullptr) return;
+  APPBARDATA data{};
+  data.cbSize = sizeof(data);
+  data.hWnd = g_appBarHwnd;
+  SHAppBarMessage(ABM_REMOVE, &data);
+  g_appBarHwnd = nullptr;
+}
+
+bool setAppBar(const std::string& argument) {
+  std::istringstream input(argument);
+  std::string part;
+  std::vector<std::string> values;
+  while (std::getline(input, part, ',')) values.push_back(part);
+  if (values.size() != 5) return false;
+
+  HWND hwnd = nullptr;
+  if (!parseHwnd(values[0], hwnd)) return false;
+
+  long coordinates[4]{};
+  for (size_t index = 0; index < 4; ++index) {
+    const auto [end, error] = std::from_chars(
+        values[index + 1].data(), values[index + 1].data() + values[index + 1].size(), coordinates[index]);
+    if (error != std::errc{} || end != values[index + 1].data() + values[index + 1].size()) return false;
+  }
+
+  if (g_appBarHwnd != hwnd) {
+    removeAppBar();
+    APPBARDATA registration{};
+    registration.cbSize = sizeof(registration);
+    registration.hWnd = hwnd;
+    registration.uCallbackMessage = RegisterWindowMessageW(L"FlowDock.AppBarMessage");
+    if (SHAppBarMessage(ABM_NEW, &registration) == 0) return false;
+    g_appBarHwnd = hwnd;
+  }
+
+  APPBARDATA position{};
+  position.cbSize = sizeof(position);
+  position.hWnd = hwnd;
+  position.uEdge = ABE_RIGHT;
+  position.rc = {coordinates[0], coordinates[1], coordinates[2], coordinates[3]};
+  const LONG width = position.rc.right - position.rc.left;
+  SHAppBarMessage(ABM_QUERYPOS, &position);
+  position.rc.left = position.rc.right - width;
+  return SHAppBarMessage(ABM_SETPOS, &position) != 0;
+}
+
 void emitResult(const Command& command, bool ok) {
   writeLine("{\"type\":\"result\",\"requestId\":\"" + escapeJson(command.requestId) +
             "\",\"ok\":" + (ok ? "true" : "false") + "}");
@@ -214,7 +263,17 @@ void processCommand(Command* rawCommand) {
     emitResult(*command, ok);
     return;
   }
+  if (command->verb == "APPBAR") {
+    emitResult(*command, setAppBar(command->argument));
+    return;
+  }
+  if (command->verb == "UNAPPBAR") {
+    removeAppBar();
+    emitResult(*command, true);
+    return;
+  }
   if (command->verb == "QUIT") {
+    removeAppBar();
     emitResult(*command, true);
     g_running = false;
     PostQuitMessage(0);
@@ -246,8 +305,18 @@ void CALLBACK eventCallback(HWINEVENTHOOK, DWORD, HWND hwnd, LONG objectId, LONG
 }
 }  // namespace
 
-int main() {
+int main(int argc, char* argv[]) {
   SetConsoleOutputCP(CP_UTF8);
+
+  // A process created directly by the foreground process is eligible to request
+  // foreground activation under Windows' normal focus policy. Electron uses this
+  // one-shot mode only in direct response to a user click or Enter key press.
+  if (argc == 3 && std::string_view(argv[1]) == "--activate") {
+    HWND hwnd = nullptr;
+    if (!parseHwnd(argv[2], hwnd)) return 2;
+    return activateWindow(hwnd) ? 0 : 3;
+  }
+
   g_mainThreadId = GetCurrentThreadId();
   MSG bootstrap{};
   PeekMessageW(&bootstrap, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
@@ -282,6 +351,7 @@ int main() {
   }
 
   g_running = false;
+  removeAppBar();
   if (g_refreshTimer != 0) KillTimer(nullptr, g_refreshTimer);
   for (const HWINEVENTHOOK hook : hooks) UnhookWinEvent(hook);
   if (inputThread.joinable()) inputThread.detach();

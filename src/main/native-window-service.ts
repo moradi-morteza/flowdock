@@ -41,6 +41,7 @@ export declare interface NativeWindowService {
 
 export class NativeWindowService extends EventEmitter {
   private child: ChildProcessWithoutNullStreams | null = null
+  private helperPath: string | null = null
   private requestSequence = 0
   private readonly pending = new Map<string, PendingRequest>()
   private readonly iconCache = new Map<string, Promise<string | null>>()
@@ -48,6 +49,7 @@ export class NativeWindowService extends EventEmitter {
   private excludedHwnd: string | null = null
   private enrichmentGeneration = 0
   private shuttingDown = false
+  private appBarSpec: string | null = null
 
   setExcludedHwnd(hwnd: string): void {
     this.excludedHwnd = hwnd
@@ -72,6 +74,7 @@ export class NativeWindowService extends EventEmitter {
       return
     }
 
+    this.helperPath = helperPath
     console.info(`[native] starting ${helperPath}`)
     this.child = spawn(helperPath, [], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
     this.child.stderr.setEncoding('utf8')
@@ -97,9 +100,30 @@ export class NativeWindowService extends EventEmitter {
   }
 
   async activateWindow(hwnd: string): Promise<boolean> {
-    if (!/^\d+$/.test(hwnd)) return false
-    const message = await this.request('ACTIVATE', hwnd)
-    return message.type === 'result' && message.ok
+    if (!/^\d+$/.test(hwnd) || !this.helperPath) return false
+
+    // Spawn at the moment of the user gesture. Windows permits a process that
+    // was started by the current foreground process to request foreground focus.
+    return new Promise((resolve) => {
+      const activator = spawn(this.helperPath!, ['--activate', hwnd], {
+        windowsHide: true,
+        stdio: 'ignore'
+      })
+      let settled = false
+      let timeout: NodeJS.Timeout | undefined
+      const finish = (result: boolean): void => {
+        if (settled) return
+        settled = true
+        if (timeout) clearTimeout(timeout)
+        resolve(result)
+      }
+      timeout = setTimeout(() => {
+        activator.kill()
+        finish(false)
+      }, 1500)
+      activator.once('error', () => finish(false))
+      activator.once('exit', (code) => finish(code === 0))
+    })
   }
 
   async restoreWindow(hwnd: string): Promise<boolean> {
@@ -108,10 +132,30 @@ export class NativeWindowService extends EventEmitter {
     return message.type === 'result' && message.ok
   }
 
+  async setAppBar(
+    hwnd: string,
+    bounds: { x: number; y: number; width: number; height: number }
+  ): Promise<boolean> {
+    if (!/^\d+$/.test(hwnd)) return false
+    const spec = `${hwnd},${bounds.x},${bounds.y},${bounds.x + bounds.width},${bounds.y + bounds.height}`
+    if (spec === this.appBarSpec) return true
+    const message = await this.request('APPBAR', spec)
+    const ok = message.type === 'result' && message.ok
+    if (ok) this.appBarSpec = spec
+    return ok
+  }
+
+  async removeAppBar(): Promise<void> {
+    if (!this.child || !this.appBarSpec) return
+    await this.request('UNAPPBAR', undefined, 800)
+    this.appBarSpec = null
+  }
+
   async stop(): Promise<void> {
     this.shuttingDown = true
     if (!this.child) return
     try {
+      await this.removeAppBar()
       await this.request('QUIT', undefined, 800)
     } catch {
       this.child.kill()
@@ -161,6 +205,14 @@ export class NativeWindowService extends EventEmitter {
   private async applySnapshot(message: NativeSnapshotMessage): Promise<void> {
     const generation = ++this.enrichmentGeneration
     const visibleWindows = message.windows.filter((window) => window.hwnd !== this.excludedHwnd)
+    const previousOrder = new Map(
+      this.snapshot.windows.map((window, index) => [window.hwnd, index])
+    )
+    visibleWindows.sort((left, right) => {
+      const leftIndex = previousOrder.get(left.hwnd) ?? Number.MAX_SAFE_INTEGER
+      const rightIndex = previousOrder.get(right.hwnd) ?? Number.MAX_SAFE_INTEGER
+      return leftIndex - rightIndex
+    })
     const windows = await Promise.all(
       visibleWindows.map(async (window): Promise<DesktopWindow> => ({
         ...window,

@@ -6,6 +6,7 @@
   "author": "FlowDock contributors",
   "license": "MIT",
   "scripts": {
+    "predev": "npm run build:native",
     "dev": "electron-vite dev",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "build": "npm run typecheck && electron-vite build",

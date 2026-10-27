@@ -4,7 +4,7 @@ project(flowdock_native LANGUAGES CXX)
 add_executable(flowdock-native src/main.cpp)
 target_compile_features(flowdock-native PRIVATE cxx_std_20)
 target_compile_definitions(flowdock-native PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(flowdock-native PRIVATE user32 dwmapi kernel32)
+target_link_libraries(flowdock-native PRIVATE user32 dwmapi kernel32 shell32)
 
 set_target_properties(flowdock-native PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
@@ -13,4 +13,7 @@ set_target_properties(flowdock-native PROPERTIES
 
 if(MSVC)
   target_compile_options(flowdock-native PRIVATE /W4 /permissive- /EHsc /utf-8)
+elseif(MINGW)
+  target_compile_options(flowdock-native PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_options(flowdock-native PRIVATE -static -static-libgcc -static-libstdc++)
 endif()

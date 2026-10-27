@@ -18,14 +18,33 @@ function nativeHandleString(window: BrowserWindow): string {
 function positionDock(): void {
   if (!dock) return
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-  const { x, y, width, height } = display.workArea
-  dock.setBounds({ x: x + width - dockWidth, y, width: dockWidth, height }, false)
+  const bounds = {
+    x: display.bounds.x + display.bounds.width - dockWidth,
+    y: display.workArea.y,
+    width: dockWidth,
+    height: display.workArea.height
+  }
+  dock.setBounds(bounds, false)
+  void windows.setAppBar(nativeHandleString(dock), bounds).catch((error: unknown) => {
+    console.error('[appbar] unable to reserve desktop work area', error)
+  })
+}
+
+function hideDock(): void {
+  if (!dock) return
+  void windows.removeAppBar().finally(() => dock?.hide())
+}
+
+function keepDockAboveWindows(): void {
+  if (!dock?.isVisible()) return
+  dock.setAlwaysOnTop(true, 'floating')
+  dock.moveTop()
 }
 
 function toggleDock(): void {
   if (!dock) return
   if (dock.isVisible()) {
-    dock.hide()
+    hideDock()
   } else {
     positionDock()
     dock.show()
@@ -69,7 +88,7 @@ function createDock(): void {
   dock.on('close', (event) => {
     if (!isQuitting) {
       event.preventDefault()
-      dock?.hide()
+      hideDock()
     }
   })
   dock.on('resize', () => {
@@ -102,17 +121,20 @@ app.whenReady().then(() => {
   screen.on('display-removed', positionDock)
 })
 
-windows.on('snapshot', (snapshot) => dock?.webContents.send('flowdock:snapshot', snapshot))
+windows.on('snapshot', (snapshot) => {
+  dock?.webContents.send('flowdock:snapshot', snapshot)
+  keepDockAboveWindows()
+})
 windows.on('error', () => undefined)
 
 ipcMain.handle('flowdock:get-snapshot', () => windows.getSnapshot())
 ipcMain.handle('flowdock:activate', async (_, hwnd: unknown) => {
   if (typeof hwnd !== 'string') return false
   const activated = await windows.activateWindow(hwnd)
-  if (activated) dock?.hide()
+  if (activated) keepDockAboveWindows()
   return activated
 })
-ipcMain.handle('flowdock:hide', () => dock?.hide())
+ipcMain.handle('flowdock:hide', hideDock)
 ipcMain.handle('flowdock:set-width', (_, requestedWidth: unknown) => {
   if (typeof requestedWidth !== 'number' || !Number.isFinite(requestedWidth)) return dockWidth
   dockWidth = Math.round(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, requestedWidth)))

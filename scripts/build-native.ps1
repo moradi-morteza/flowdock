@@ -1,4 +1,3 @@
-```powershell
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -21,11 +20,6 @@ if (-not (Test-Path $make)) {
     throw "MinGW Make not found at $make. Check your MinGW installation."
 }
 
-# Remove the previous CMake cache because it may use Ninja.
-if (Test-Path $build) {
-    Remove-Item $build -Recurse -Force
-}
-
 & $cmake `
     -S $native `
     -B $build `
@@ -38,17 +32,21 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configuration failed."
 }
 
-& $cmake --build $build --config Release --parallel
+& $cmake --build $build --parallel
 
 if ($LASTEXITCODE -ne 0) {
     throw "Native compilation failed."
 }
 
-$output = Join-Path $build "bin\flowdock-native.exe"
+$builtOutput = Join-Path $build "bin\flowdock-native.exe"
+$releaseDirectory = Join-Path $build "bin\Release"
+$releaseOutput = Join-Path $releaseDirectory "flowdock-native.exe"
 
-if (-not (Test-Path $output)) {
-    throw "Native helper was not produced at $output"
+if (-not (Test-Path $builtOutput)) {
+    throw "Native helper was not produced at $builtOutput"
 }
 
-Write-Host "Built successfully: $output" -ForegroundColor Green
-```
+New-Item -ItemType Directory -Force -Path $releaseDirectory | Out-Null
+Copy-Item -Force $builtOutput $releaseOutput
+
+Write-Host "Built successfully: $releaseOutput" -ForegroundColor Green
