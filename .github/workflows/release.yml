@@ -39,7 +39,7 @@ jobs:
         run: |
           $version = "${{ github.ref_name }}" -replace '^v', ''
           if ($version -match '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') {
-            npm version $version --no-git-tag-version
+            npm version $version --no-git-tag-version --allow-same-version
           } else {
             Write-Host "Tag is not a semantic version; keeping package.json version."
           }
