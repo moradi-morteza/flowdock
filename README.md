@@ -9,11 +9,12 @@ FlowDock is a Windows 10/11 desktop sidebar for finding and activating real top-
 - Real window activation via `ShowWindowAsync(SW_RESTORE)` and `SetForegroundWindow`
 - Per-window title, executable/process name, icon, minimized state, and active indicator
 - Per-window monitor badges; Shift+Click or Shift+Enter moves a window to the primary monitor
+- Native right-click window menu with optional app/project launch at Windows startup
 - App grouping, collapsible groups, full-title tooltips, search, and compact dark UI
 - Global `Ctrl+Alt+Space` show/hide shortcut
 - `Up` / `Down`, `Enter`, and `Escape` keyboard controls while the sidebar is active
 - Sandboxed renderer with `contextIsolation`, a narrow preload API, and typed IPC
-- Reproducible CMake/MSVC native build and Electron Builder NSIS packaging
+- Reproducible CMake/MinGW native build and Electron Builder NSIS packaging
 
 FlowDock deliberately does not fall back to mocked window data. If the native helper is unavailable or fails, the sidebar displays the integration error.
 
@@ -22,7 +23,7 @@ FlowDock deliberately does not fall back to mocked window data. If the native he
 - Windows 10 or Windows 11, x64
 - Node.js 22+
 - CMake 3.24+
-- Visual Studio 2022 Build Tools with **Desktop development with C++** and a Windows SDK
+- MinGW-w64 with `g++` and `mingw32-make`
 
 Run all commands below from Windows PowerShell (not WSL):
 
@@ -65,6 +66,8 @@ npm run build
 
 Open three projects with **File → Open → New Window** in PhpStorm. Each top-level project window should have a different HWND and appear as a separate row in the PhpStorm group. The list updates after windows open, close, minimize, restore, change title, or become active.
 
+Right-click an IDE window and select **Open project at Windows startup…** to choose its project folder. FlowDock stores the selection in the current Windows user's application-data directory, enables its own login item, and opens the saved project only when Windows launches FlowDock at sign-in.
+
 ## Package for Windows
 
 Create an unpacked test build:
@@ -81,8 +84,8 @@ npm run build:win
 
 Artifacts are written to `release/`:
 
-- `FlowDock-1.0.0-x64-Setup.exe`
-- `FlowDock-1.0.0-x64-Portable.exe`
+- `FlowDock-1.1.0-x64-Setup.exe`
+- `FlowDock-1.1.0-x64-Portable.exe`
 
 Build only one target when needed:
 
@@ -90,6 +93,16 @@ Build only one target when needed:
 npm run build:win:installer
 npm run build:win:portable
 ```
+
+### Automatic GitHub releases
+
+The workflow in `.github/workflows/release.yml` builds both Windows packages on every push:
+
+- A normal commit creates a prerelease named `build-<short-sha>`.
+- A pushed Git tag creates a final release using that tag.
+- A semantic tag such as `v1.1.0` also sets the packaged application and artifact version to `1.1.0`.
+
+Both the installer and portable executable are attached to the GitHub release automatically.
 
 ## Architecture
 

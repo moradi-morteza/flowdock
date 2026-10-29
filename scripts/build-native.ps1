@@ -4,21 +4,44 @@ $root = Split-Path -Parent $PSScriptRoot
 $native = Join-Path $root "native"
 $build = Join-Path $native "build"
 
-$cmake = "C:\mingw64\bin\cmake.exe"
-$compiler = "C:\mingw64\bin\g++.exe"
-$make = "C:\mingw64\bin\mingw32-make.exe"
+function Find-Tool {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Candidates
+    )
 
-if (-not (Test-Path $cmake)) {
-    throw "CMake not found at $cmake"
+    foreach ($candidate in $Candidates) {
+        if ($candidate -and (Test-Path $candidate)) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+
+    $command = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    throw "$Name was not found. Install CMake and MinGW-w64, then add them to PATH."
 }
 
-if (-not (Test-Path $compiler)) {
-    throw "MinGW C++ compiler not found at $compiler"
-}
+$cmake = Find-Tool -Name "cmake.exe" -Candidates @(
+    "C:\mingw64\bin\cmake.exe",
+    "C:\Program Files\CMake\bin\cmake.exe"
+)
+$compiler = Find-Tool -Name "g++.exe" -Candidates @(
+    "C:\mingw64\bin\g++.exe",
+    "C:\msys64\mingw64\bin\g++.exe"
+)
+$make = Find-Tool -Name "mingw32-make.exe" -Candidates @(
+    "C:\mingw64\bin\mingw32-make.exe",
+    "C:\msys64\mingw64\bin\mingw32-make.exe"
+)
 
-if (-not (Test-Path $make)) {
-    throw "MinGW Make not found at $make. Check your MinGW installation."
-}
+Write-Host "CMake: $cmake"
+Write-Host "Compiler: $compiler"
+Write-Host "Make: $make"
 
 & $cmake `
     -S $native `

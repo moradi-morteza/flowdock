@@ -1,6 +1,6 @@
 {
   "name": "flowdock",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A fast, native Windows window switcher sidebar",
   "main": "out/main/index.js",
   "author": "FlowDock contributors",
