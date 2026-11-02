@@ -66,7 +66,7 @@ npm run build
 
 Open three projects with **File → Open → New Window** in PhpStorm. Each top-level project window should have a different HWND and appear as a separate row in the PhpStorm group. The list updates after windows open, close, minimize, restore, change title, or become active.
 
-Right-click an IDE window and select **Open project at Windows startup…** to choose its project folder. FlowDock stores the selection in the current Windows user's application-data directory, enables its own login item, and opens the saved project only when Windows launches FlowDock at sign-in.
+Right-click an IDE window and select **Open project at Windows startup…**. For JetBrains IDEs, FlowDock resolves the path from the IDE's recent-project metadata automatically; the folder picker is only used as a fallback when no reliable match is found. FlowDock stores the selection in the current Windows user's application-data directory, enables its own login item, and opens the saved project only when Windows launches FlowDock at sign-in.
 
 ## Package for Windows
 
@@ -84,8 +84,8 @@ npm run build:win
 
 Artifacts are written to `release/`:
 
-- `FlowDock-1.1.0-x64-Setup.exe`
-- `FlowDock-1.1.0-x64-Portable.exe`
+- `FlowDock-1.2.0-x64-Setup.exe`
+- `FlowDock-1.2.0-x64-Portable.exe`
 
 Build only one target when needed:
 

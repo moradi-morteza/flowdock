@@ -50,6 +50,7 @@ export class NativeWindowService extends EventEmitter {
   private enrichmentGeneration = 0
   private shuttingDown = false
   private appBarSpec: string | null = null
+  private appBarQueue: Promise<void> = Promise.resolve()
 
   setExcludedHwnd(hwnd: string): void {
     this.excludedHwnd = hwnd
@@ -145,16 +146,27 @@ export class NativeWindowService extends EventEmitter {
     if (!/^\d+$/.test(hwnd)) return false
     const spec = `${hwnd},${bounds.x},${bounds.y},${bounds.x + bounds.width},${bounds.y + bounds.height}`
     if (spec === this.appBarSpec) return true
-    const message = await this.request('APPBAR', spec)
-    const ok = message.type === 'result' && message.ok
-    if (ok) this.appBarSpec = spec
-    return ok
+    return this.queueAppBarOperation(async () => {
+      if (spec === this.appBarSpec) return true
+      const message = await this.request('APPBAR', spec)
+      const ok = message.type === 'result' && message.ok
+      if (ok) this.appBarSpec = spec
+      return ok
+    })
   }
 
   async removeAppBar(): Promise<void> {
-    if (!this.child || !this.appBarSpec) return
-    await this.request('UNAPPBAR', undefined, 800)
-    this.appBarSpec = null
+    await this.queueAppBarOperation(async () => {
+      if (!this.child) {
+        this.appBarSpec = null
+        return
+      }
+      try {
+        await this.request('UNAPPBAR', undefined, 1200)
+      } finally {
+        this.appBarSpec = null
+      }
+    })
   }
 
   async stop(): Promise<void> {
@@ -180,6 +192,14 @@ export class NativeWindowService extends EventEmitter {
       this.pending.set(requestId, { resolve, reject, timeout })
       this.child?.stdin.write(`${verb} ${requestId}${argument ? ` ${argument}` : ''}\n`)
     })
+  }
+
+  private queueAppBarOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.appBarQueue
+      .catch(() => undefined)
+      .then(operation)
+    this.appBarQueue = result.then(() => undefined, () => undefined)
+    return result
   }
 
   private handleLine(line: string): void {

@@ -213,7 +213,7 @@ export default function App(): React.JSX.Element {
     }
     const stop = (): void => {
       if (animationFrame !== null) window.cancelAnimationFrame(animationFrame)
-      void window.flowDock.setWidth(pendingWidth)
+      void window.flowDock.setWidth(pendingWidth, true)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', stop)
       window.removeEventListener('pointercancel', stop)
@@ -442,7 +442,7 @@ export default function App(): React.JSX.Element {
               <span title="Shift+Enter also moves the selected window"><kbd>⇧</kbd> click → primary</span>
             </>
           ) : (
-            <><span><kbd>ESC</kbd> back</span><span>FlowDock v1.1.0</span></>
+            <><span><kbd>ESC</kbd> back</span><span>FlowDock v1.2.0</span></>
           )}
         </footer>
       </div>

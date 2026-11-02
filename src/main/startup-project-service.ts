@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { basename, dirname } from 'node:path'
+import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { basename, dirname, join, win32 } from 'node:path'
 import type { DesktopWindow, WindowSnapshot } from '../shared/window'
 
 interface StartupProject {
@@ -25,10 +25,57 @@ function samePath(left: string, right: string): boolean {
   return left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0
 }
 
+const jetBrainsProducts: Record<string, string> = {
+  phpstorm64: 'PhpStorm',
+  webstorm64: 'WebStorm',
+  idea64: 'IntelliJIdea',
+  pycharm64: 'PyCharm',
+  rider64: 'Rider',
+  goland64: 'GoLand',
+  clion64: 'CLion',
+  rubymine64: 'RubyMine',
+  datagrip64: 'DataGrip'
+}
+
+function decodeXml(value: string): string {
+  return value
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([\da-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
+function xmlAttribute(attributes: string, name: string): string | null {
+  const match = attributes.match(new RegExp(`\\b${name}="([^"]*)"`))
+  return match ? decodeXml(match[1]) : null
+}
+
+function projectNameFromPath(projectPath: string): string {
+  return win32.basename(projectPath.replaceAll('/', '\\')) || basename(projectPath)
+}
+
+function matchProjectScore(windowTitle: string, frameTitle: string | null, projectName: string): number {
+  const title = windowTitle.trim().toLocaleLowerCase()
+  const frame = frameTitle?.trim().toLocaleLowerCase() ?? ''
+  const name = projectName.trim().toLocaleLowerCase()
+  if (frame && title === frame) return 1000
+  if (name && title === name) return 950
+  if (frame && title.startsWith(frame)) return 900
+  if (name && new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s*[–—-]|\\s*\\[)`).test(title)) return 850
+  return 0
+}
+
 export class StartupProjectService {
   private items: StartupProject[] = []
 
-  constructor(private readonly settingsPath: string) {}
+  constructor(
+    private readonly settingsPath: string,
+    private readonly jetBrainsConfigRoot: string,
+    private readonly userHome: string
+  ) {}
 
   async load(): Promise<void> {
     try {
@@ -73,6 +120,54 @@ export class StartupProjectService {
   async remove(id: string): Promise<void> {
     this.items = this.items.filter((item) => item.id !== id)
     await this.save()
+  }
+
+  async resolveProjectPath(desktopWindow: DesktopWindow): Promise<string | null> {
+    const product = jetBrainsProducts[desktopWindow.processName.toLocaleLowerCase()]
+    if (!product) return null
+
+    try {
+      const directories = (await readdir(this.jetBrainsConfigRoot, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory() && entry.name.toLocaleLowerCase().startsWith(product.toLocaleLowerCase()))
+        .map((entry) => entry.name)
+        .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }))
+
+      let bestMatch: { path: string; score: number } | null = null
+      for (const directory of directories) {
+        const filePath = join(this.jetBrainsConfigRoot, directory, 'options', 'recentProjects.xml')
+        let xml: string
+        try {
+          xml = await readFile(filePath, 'utf8')
+        } catch {
+          continue
+        }
+
+        const entries = xml.matchAll(/<entry\s+key="([^"]+)"[^>]*>([\s\S]*?)<\/entry>/g)
+        for (const entry of entries) {
+          let projectPath = decodeXml(entry[1])
+          if (projectPath.includes('$APPLICATION_CONFIG_DIR$')) continue
+          projectPath = projectPath.replace('$USER_HOME$', this.userHome.replaceAll('\\', '/'))
+
+          const meta = entry[2].match(/<RecentProjectMetaInfo\b([^>]*)>/)
+          const attributes = meta?.[1] ?? ''
+          const frameTitle = xmlAttribute(attributes, 'frameTitle')
+          const projectName = projectNameFromPath(projectPath)
+          let score = matchProjectScore(desktopWindow.title, frameTitle, projectName)
+          if (score === 0) continue
+          if (xmlAttribute(attributes, 'opened') === 'true') score += 25
+          if (!bestMatch || score > bestMatch.score) bestMatch = { path: projectPath, score }
+        }
+        if (bestMatch?.score && bestMatch.score >= 1000) break
+      }
+
+      if (bestMatch) {
+        console.info(`[startup-projects] detected project path for ${desktopWindow.title}: ${bestMatch.path}`)
+        return bestMatch.path
+      }
+    } catch (error) {
+      console.warn('[startup-projects] unable to inspect JetBrains recent projects', error)
+    }
+    return null
   }
 
   async launchAll(snapshot: WindowSnapshot): Promise<void> {

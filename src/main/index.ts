@@ -22,6 +22,9 @@ const projectApplications = new Set([
 ])
 let dock: BrowserWindow | null = null
 let dockWidth = DEFAULT_WIDTH
+let dockDisplayId: number | null = null
+let dockShouldBeVisible = false
+let appBarUpdateTimer: NodeJS.Timeout | null = null
 let isQuitting = false
 let startupProjects: StartupProjectService | null = null
 const windows = new NativeWindowService()
@@ -44,10 +47,11 @@ function getLoginItemIdentity(): LoginItemIdentity {
 }
 
 function migrateLegacyStartupSetting(): void {
-  if (process.platform !== 'win32' || readStartupSettings().enabled) return
+  if (process.platform !== 'win32' || !readStartupSettings().enabled) return
   try {
-    const legacy = app.getLoginItemSettings(getExecutableIdentity())
-    if (legacy.openAtLogin && legacy.executableWillLaunchAtLogin) setStartupEnabled(true)
+    // Rewriting an existing enabled entry upgrades older releases to include
+    // STARTUP_ARGUMENT without changing the user's preference.
+    setStartupEnabled(true)
   } catch (error) {
     console.warn('[startup] unable to migrate the previous startup entry', error)
   }
@@ -61,8 +65,12 @@ function readStartupSettings(): StartupSettings {
   try {
     const identity = getLoginItemIdentity()
     const settings = app.getLoginItemSettings(identity)
+    const launchItem = settings.launchItems.find((item) =>
+      item.name === 'FlowDock' &&
+      item.path.localeCompare(identity.path, undefined, { sensitivity: 'accent' }) === 0
+    )
     return {
-      enabled: settings.openAtLogin && settings.executableWillLaunchAtLogin,
+      enabled: launchItem?.enabled ?? settings.openAtLogin,
       supported: true,
       error: null
     }
@@ -84,7 +92,8 @@ function setStartupEnabled(enabled: boolean): StartupSettings {
     app.setLoginItemSettings({ ...identity, name: 'FlowDock', openAtLogin: enabled, enabled })
     const updated = readStartupSettings()
     if (updated.enabled !== enabled && !updated.error) {
-      return { ...updated, error: 'Windows did not save the startup setting.' }
+      console.warn('[startup] Windows has not reported the updated login item yet')
+      return { enabled, supported: true, error: null }
     }
     console.info(`[startup] launch at login ${enabled ? 'enabled' : 'disabled'}`)
     return updated
@@ -102,24 +111,58 @@ function nativeHandleString(window: BrowserWindow): string {
   return handle.length >= 8 ? handle.readBigUInt64LE().toString() : String(handle.readUInt32LE())
 }
 
-function positionDock(): void {
-  if (!dock) return
+function getDockDisplay(): Electron.Display {
+  const current = screen.getAllDisplays().find((display) => display.id === dockDisplayId)
+  if (current) return current
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+  dockDisplayId = display.id
+  return display
+}
+
+function reserveDockSpace(bounds: Electron.Rectangle): void {
+  if (!dock || !dockShouldBeVisible) return
+  void windows.setAppBar(nativeHandleString(dock), bounds).catch((error: unknown) => {
+    console.error('[appbar] unable to reserve desktop work area', error)
+  })
+}
+
+function scheduleDockReservation(delay = 160): void {
+  if (appBarUpdateTimer) clearTimeout(appBarUpdateTimer)
+  if (!dockShouldBeVisible) return
+  appBarUpdateTimer = setTimeout(() => {
+    appBarUpdateTimer = null
+    positionDock(true)
+  }, delay)
+}
+
+function positionDock(updateAppBar = true): void {
+  if (!dock) return
+  const display = getDockDisplay()
   const bounds = {
     x: display.bounds.x + display.bounds.width - dockWidth,
     y: display.workArea.y,
     width: dockWidth,
     height: display.workArea.height
   }
-  dock.setBounds(bounds, false)
-  void windows.setAppBar(nativeHandleString(dock), bounds).catch((error: unknown) => {
-    console.error('[appbar] unable to reserve desktop work area', error)
-  })
+  const currentBounds = dock.getBounds()
+  if (currentBounds.x !== bounds.x || currentBounds.y !== bounds.y ||
+      currentBounds.width !== bounds.width || currentBounds.height !== bounds.height) {
+    dock.setBounds(bounds, false)
+  }
+  if (updateAppBar) reserveDockSpace(bounds)
 }
 
 function hideDock(): void {
   if (!dock) return
-  void windows.removeAppBar().finally(() => dock?.hide())
+  dockShouldBeVisible = false
+  if (appBarUpdateTimer) {
+    clearTimeout(appBarUpdateTimer)
+    appBarUpdateTimer = null
+  }
+  dock.hide()
+  void windows.removeAppBar().catch((error: unknown) => {
+    console.error('[appbar] unable to release desktop work area', error)
+  })
 }
 
 function keepDockAboveWindows(): void {
@@ -133,6 +176,8 @@ function toggleDock(): void {
   if (dock.isVisible()) {
     hideDock()
   } else {
+    dockDisplayId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
+    dockShouldBeVisible = true
     positionDock()
     dock.show()
     dock.focus()
@@ -166,16 +211,19 @@ async function toggleStartupProject(desktopWindow: DesktopWindow): Promise<void>
 
     let projectPath: string | null = null
     if (isProjectApplication(desktopWindow.processName)) {
-      const options: OpenDialogOptions = {
-        title: `Select the project folder for ${desktopWindow.title}`,
-        buttonLabel: 'Open at startup',
-        properties: ['openDirectory']
+      projectPath = await startupProjects.resolveProjectPath(desktopWindow)
+      if (!projectPath) {
+        const options: OpenDialogOptions = {
+          title: `Project path was not detected — select it once for ${desktopWindow.title}`,
+          buttonLabel: 'Open at startup',
+          properties: ['openDirectory']
+        }
+        const selection = dock
+          ? await dialog.showOpenDialog(dock, options)
+          : await dialog.showOpenDialog(options)
+        if (selection.canceled || selection.filePaths.length === 0) return
+        projectPath = selection.filePaths[0]
       }
-      const selection = dock
-        ? await dialog.showOpenDialog(dock, options)
-        : await dialog.showOpenDialog(options)
-      if (selection.canceled || selection.filePaths.length === 0) return
-      projectPath = selection.filePaths[0]
     }
 
     await startupProjects.add(desktopWindow, projectPath)
@@ -272,6 +320,8 @@ function createDock(): void {
 
   dock.once('ready-to-show', () => {
     if (!dock) return
+    dockDisplayId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
+    dockShouldBeVisible = true
     positionDock()
     dock.show()
   })
@@ -279,7 +329,11 @@ function createDock(): void {
 
 app.whenReady().then(async () => {
   app.setAppUserModelId('com.flowdock.app')
-  startupProjects = new StartupProjectService(join(app.getPath('userData'), 'startup-projects.json'))
+  startupProjects = new StartupProjectService(
+    join(app.getPath('userData'), 'startup-projects.json'),
+    join(app.getPath('appData'), 'JetBrains'),
+    app.getPath('home')
+  )
   await startupProjects.load()
   migrateLegacyStartupSetting()
   createDock()
@@ -291,8 +345,17 @@ app.whenReady().then(async () => {
   if (!globalShortcut.register('Control+Alt+Space', toggleDock)) {
     console.error('[shortcut] Control+Alt+Space could not be registered')
   }
-  screen.on('display-metrics-changed', positionDock)
-  screen.on('display-removed', positionDock)
+  screen.on('display-metrics-changed', () => {
+    if (!dockShouldBeVisible) return
+    positionDock(false)
+    scheduleDockReservation()
+  })
+  screen.on('display-removed', () => {
+    if (!screen.getAllDisplays().some((display) => display.id === dockDisplayId)) dockDisplayId = null
+    if (!dockShouldBeVisible) return
+    positionDock(false)
+    scheduleDockReservation(0)
+  })
 })
 
 windows.on('snapshot', (snapshot) => {
@@ -312,10 +375,19 @@ ipcMain.handle('flowdock:close-window', (_, hwnd: unknown) => {
   return windows.closeWindow(hwnd)
 })
 ipcMain.handle('flowdock:hide', hideDock)
-ipcMain.handle('flowdock:set-width', (_, requestedWidth: unknown) => {
+ipcMain.handle('flowdock:set-width', (_, requestedWidth: unknown, final: unknown) => {
   if (typeof requestedWidth !== 'number' || !Number.isFinite(requestedWidth)) return dockWidth
   dockWidth = Math.round(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, requestedWidth)))
-  positionDock()
+  positionDock(false)
+  if (final === true) {
+    if (appBarUpdateTimer) {
+      clearTimeout(appBarUpdateTimer)
+      appBarUpdateTimer = null
+    }
+    positionDock(true)
+  } else {
+    scheduleDockReservation()
+  }
   return dockWidth
 })
 ipcMain.handle('flowdock:get-startup-settings', readStartupSettings)
@@ -333,6 +405,7 @@ app.on('before-quit', () => {
 })
 
 app.on('will-quit', () => {
+  if (appBarUpdateTimer) clearTimeout(appBarUpdateTimer)
   globalShortcut.unregisterAll()
   void windows.stop()
 })

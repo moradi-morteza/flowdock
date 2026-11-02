@@ -259,13 +259,23 @@ bool moveWindowToPrimary(HWND hwnd) {
   return SetForegroundWindow(hwnd) != FALSE;
 }
 
-void removeAppBar() {
-  if (g_appBarHwnd == nullptr) return;
+bool removeAppBar() {
+  if (g_appBarHwnd == nullptr) return true;
   APPBARDATA data{};
   data.cbSize = sizeof(data);
   data.hWnd = g_appBarHwnd;
-  SHAppBarMessage(ABM_REMOVE, &data);
+  const bool removed = SHAppBarMessage(ABM_REMOVE, &data) != 0;
   g_appBarHwnd = nullptr;
+  DWORD_PTR broadcastResult = 0;
+  SendMessageTimeoutW(
+      HWND_BROADCAST,
+      WM_SETTINGCHANGE,
+      SPI_SETWORKAREA,
+      0,
+      SMTO_ABORTIFHUNG,
+      250,
+      &broadcastResult);
+  return removed;
 }
 
 bool setAppBar(const std::string& argument) {
@@ -337,8 +347,7 @@ void processCommand(Command* rawCommand) {
     return;
   }
   if (command->verb == "UNAPPBAR") {
-    removeAppBar();
-    emitResult(*command, true);
+    emitResult(*command, removeAppBar());
     return;
   }
   if (command->verb == "QUIT") {

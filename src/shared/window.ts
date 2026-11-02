@@ -27,7 +27,7 @@ export interface FlowDockApi {
   activateWindow(hwnd: string, moveToPrimary?: boolean): Promise<boolean>
   closeWindow(hwnd: string): Promise<boolean>
   hide(): Promise<void>
-  setWidth(width: number): Promise<number>
+  setWidth(width: number, final?: boolean): Promise<number>
   getStartupSettings(): Promise<StartupSettings>
   setStartupEnabled(enabled: boolean): Promise<StartupSettings>
   showWindowMenu(hwnd: string): Promise<boolean>

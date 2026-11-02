@@ -7,7 +7,8 @@ const api: FlowDockApi = {
     ipcRenderer.invoke('flowdock:activate', hwnd, moveToPrimary) as Promise<boolean>,
   closeWindow: (hwnd) => ipcRenderer.invoke('flowdock:close-window', hwnd) as Promise<boolean>,
   hide: () => ipcRenderer.invoke('flowdock:hide') as Promise<void>,
-  setWidth: (width) => ipcRenderer.invoke('flowdock:set-width', width) as Promise<number>,
+  setWidth: (width, final = false) =>
+    ipcRenderer.invoke('flowdock:set-width', width, final) as Promise<number>,
   getStartupSettings: () =>
     ipcRenderer.invoke('flowdock:get-startup-settings') as Promise<StartupSettings>,
   setStartupEnabled: (enabled) =>
