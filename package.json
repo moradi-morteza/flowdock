@@ -11,9 +11,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "build": "npm run typecheck && electron-vite build",
     "build:native": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-native.ps1",
-    "build:win": "npm run build:native && npm run build && electron-builder --win",
-    "build:win:installer": "npm run build:native && npm run build && electron-builder --win nsis",
-    "build:win:portable": "npm run build:native && npm run build && electron-builder --win portable",
+    "build:win": "npm run build:native && npm run build && electron-builder --win --publish never",
+    "build:win:installer": "npm run build:native && npm run build && electron-builder --win nsis --publish never",
+    "build:win:portable": "npm run build:native && npm run build && electron-builder --win portable --publish never",
     "pack:win": "npm run build:native && npm run build && electron-builder --win dir"
   },
   "dependencies": {
