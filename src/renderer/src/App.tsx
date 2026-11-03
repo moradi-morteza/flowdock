@@ -417,8 +417,8 @@ export default function App(): React.JSX.Element {
                     startupSettings.enabled ? 'bg-cyan-400' : 'bg-white/10'
                   }`}
                 >
-                  <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform ${
-                    startupSettings.enabled ? 'translate-x-[18px]' : 'translate-x-0.5'
+                  <span className={`absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform ${
+                    startupSettings.enabled ? 'translate-x-4' : 'translate-x-0'
                   }`} />
                 </button>
               </div>
@@ -442,7 +442,7 @@ export default function App(): React.JSX.Element {
               <span title="Shift+Enter also moves the selected window"><kbd>⇧</kbd> click → primary</span>
             </>
           ) : (
-            <><span><kbd>ESC</kbd> back</span><span>FlowDock v1.2.0</span></>
+            <><span><kbd>ESC</kbd> back</span><span>FlowDock v1.2.1</span></>
           )}
         </footer>
       </div>

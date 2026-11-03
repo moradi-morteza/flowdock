@@ -84,8 +84,8 @@ npm run build:win
 
 Artifacts are written to `release/`:
 
-- `FlowDock-1.2.0-x64-Setup.exe`
-- `FlowDock-1.2.0-x64-Portable.exe`
+- `FlowDock-1.2.1-x64-Setup.exe`
+- `FlowDock-1.2.1-x64-Portable.exe`
 
 Build only one target when needed:
 

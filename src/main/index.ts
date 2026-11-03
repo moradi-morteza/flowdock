@@ -9,6 +9,7 @@ const DEFAULT_WIDTH = 280
 const MIN_WIDTH = 240
 const MAX_WIDTH = 420
 const STARTUP_ARGUMENT = '--flowdock-startup'
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
 const projectApplications = new Set([
   'phpstorm64',
   'webstorm64',
@@ -185,6 +186,16 @@ function toggleDock(): void {
   }
 }
 
+function showDockOnCursorDisplay(): void {
+  if (!dock) return
+  dockDisplayId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
+  dockShouldBeVisible = true
+  positionDock()
+  dock.show()
+  dock.focus()
+  dock.webContents.send('flowdock:focus-search')
+}
+
 function isProjectApplication(processName: string): boolean {
   return projectApplications.has(processName.toLocaleLowerCase())
 }
@@ -327,7 +338,17 @@ function createDock(): void {
   })
 }
 
+if (!hasSingleInstanceLock) {
+  app.quit()
+}
+
+app.on('second-instance', () => {
+  if (!dock) return
+  showDockOnCursorDisplay()
+})
+
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return
   app.setAppUserModelId('com.flowdock.app')
   startupProjects = new StartupProjectService(
     join(app.getPath('userData'), 'startup-projects.json'),
