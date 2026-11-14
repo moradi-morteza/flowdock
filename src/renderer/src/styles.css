@@ -3,10 +3,87 @@
 @tailwind utilities;
 
 :root {
-  font-family: Inter, "Segoe UI Variable", "Segoe UI", sans-serif;
+  --panel-bg: 11 14 20;
+  --surface-bg: 18 23 33;
+  --accent: 34 211 238;
+  --accent-2: 99 102 241;
+  --panel-opacity: 0.94;
+  --ring-track: 255 255 255 / 0.06;
+  --app-font: "Segoe UI Variable", "Segoe UI", sans-serif;
+  --font-scale: 1;
+  font-family: var(--app-font);
   color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+}
+
+.flowdock-shell .text-\[8px\] { font-size: calc(8px * var(--font-scale)); }
+.flowdock-shell .text-\[9px\] { font-size: calc(9px * var(--font-scale)); }
+.flowdock-shell .text-\[10px\] { font-size: calc(10px * var(--font-scale)); }
+.flowdock-shell .text-\[11px\] { font-size: calc(11px * var(--font-scale)); }
+.flowdock-shell .text-\[12px\] { font-size: calc(12px * var(--font-scale)); }
+.flowdock-shell .text-\[13px\] { font-size: calc(13px * var(--font-scale)); }
+.flowdock-shell .text-\[30px\] { font-size: calc(30px * var(--font-scale)); }
+.flowdock-shell .text-xs { font-size: calc(12px * var(--font-scale)); }
+
+[data-motion="off"] *,
+[data-motion="off"] *::before,
+[data-motion="off"] *::after {
+  scroll-behavior: auto !important;
+  animation: none !important;
+  transition-duration: 0s !important;
+}
+
+[data-language="fa"] {
+  text-rendering: optimizeLegibility;
+}
+
+[data-language="fa"] .font-mono,
+[data-language="fa"] kbd {
+  font-family: "Vazirmatn Variable", Consolas, monospace;
+}
+
+[data-theme="light"] .flowdock-shell {
+  color: rgb(15 23 42);
+  border-color: rgb(15 23 42 / 0.12);
+}
+
+[data-theme="light"] .flowdock-shell .text-white,
+[data-theme="light"] .flowdock-shell .text-slate-100,
+[data-theme="light"] .flowdock-shell .text-slate-200 {
+  color: rgb(15 23 42);
+}
+
+[data-theme="light"] .flowdock-shell .text-slate-300 {
+  color: rgb(51 65 85);
+}
+
+[data-theme="light"] .flowdock-shell .text-slate-400,
+[data-theme="light"] .flowdock-shell .text-slate-500 {
+  color: rgb(71 85 105);
+}
+
+[data-theme="light"] .flowdock-shell .text-amber-100,
+[data-theme="light"] .flowdock-shell .text-amber-200 {
+  color: rgb(146 64 14);
+}
+
+[data-theme="light"] .flowdock-shell input,
+[data-theme="light"] .flowdock-shell select {
+  color: rgb(15 23 42);
+}
+
+[data-theme="light"] .flowdock-shell input::placeholder {
+  color: rgb(100 116 139);
+}
+
+[data-theme="light"] .flowdock-shell option {
+  color: rgb(15 23 42);
+  background: rgb(255 255 255);
+}
+
+[data-theme="light"] .flowdock-shell.shadow-dock {
+  box-shadow: -10px 0 30px rgb(15 23 42 / 0.14);
 }
 
 * {

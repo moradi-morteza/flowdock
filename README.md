@@ -1,6 +1,6 @@
 # FlowDock
 
-FlowDock is a Windows 10/11 desktop sidebar for finding and activating real top-level application windows. Each entry is keyed by its `HWND`, so independent PhpStorm projects appear and switch separately even when they belong to the same process/application group.
+FlowDock is a lightweight Windows productivity sidebar for switching windows, managing focus sessions, and keeping daily tasks within reach.
 
 ## What is implemented
 
@@ -11,6 +11,14 @@ FlowDock is a Windows 10/11 desktop sidebar for finding and activating real top-
 - Per-window monitor badges; Shift+Click or Shift+Enter moves a window to the primary monitor
 - Native right-click window menu with optional app/project launch at Windows startup
 - App grouping, collapsible groups, full-title tooltips, search, and compact dark UI
+- Built-in Pomodoro timer with Focus/Short/Long modes, configurable durations, daily session count, and lightweight task management
+- Pomodoro state and tasks persist locally; completed sessions update the active task and trigger a native Windows notification
+- Persistent appearance controls for theme preset, accent color, font family and size, glass effect, and interface animations
+- English and Persian interface languages with automatic LTR/RTL layout and a bundled offline Vazirmatn variable font
+- System tray controls for show/hide, Pomodoro focus/pause, and a real application exit
+- Configurable global shortcuts for the dock, Pomodoro, next-window activation, and moving windows between monitors
+- Per-monitor dock placement (cursor, primary, or fixed) and a configurable window-move target
+- Local Pomodoro daily/weekly history, focus minutes, task session totals, and a daily goal
 - Global `Ctrl+Alt+Space` show/hide shortcut
 - `Up` / `Down`, `Enter`, and `Escape` keyboard controls while the sidebar is active
 - Sandboxed renderer with `contextIsolation`, a narrow preload API, and typed IPC
@@ -84,8 +92,8 @@ npm run build:win
 
 Artifacts are written to `release/`:
 
-- `FlowDock-1.2.1-x64-Setup.exe`
-- `FlowDock-1.2.1-x64-Portable.exe`
+- `FlowDock-1.3.0-x64-Setup.exe`
+- `FlowDock-1.3.0-x64-Portable.exe`
 
 Build only one target when needed:
 

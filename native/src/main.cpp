@@ -214,12 +214,32 @@ BOOL CALLBACK findPrimaryMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM parameter
   return TRUE;
 }
 
-bool moveWindowToPrimary(HWND hwnd) {
-  if (!IsWindow(hwnd)) return false;
+BOOL CALLBACK collectMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM parameter) {
+  reinterpret_cast<std::vector<HMONITOR>*>(parameter)->push_back(monitor);
+  return TRUE;
+}
 
-  HMONITOR primaryMonitor = nullptr;
-  EnumDisplayMonitors(nullptr, nullptr, findPrimaryMonitor, reinterpret_cast<LPARAM>(&primaryMonitor));
-  if (primaryMonitor == nullptr) return false;
+std::vector<HMONITOR> orderedMonitors() {
+  std::vector<HMONITOR> monitors;
+  EnumDisplayMonitors(nullptr, nullptr, collectMonitor, reinterpret_cast<LPARAM>(&monitors));
+  std::ranges::sort(monitors, [](HMONITOR left, HMONITOR right) {
+    MONITORINFO leftInfo{};
+    MONITORINFO rightInfo{};
+    leftInfo.cbSize = sizeof(leftInfo);
+    rightInfo.cbSize = sizeof(rightInfo);
+    GetMonitorInfoW(left, &leftInfo);
+    GetMonitorInfoW(right, &rightInfo);
+    if (leftInfo.rcMonitor.left != rightInfo.rcMonitor.left) {
+      return leftInfo.rcMonitor.left < rightInfo.rcMonitor.left;
+    }
+    return leftInfo.rcMonitor.top < rightInfo.rcMonitor.top;
+  });
+  return monitors;
+}
+
+bool moveWindowToMonitor(HWND hwnd, HMONITOR targetMonitor) {
+  if (!IsWindow(hwnd)) return false;
+  if (targetMonitor == nullptr) return false;
 
   const bool wasMaximized = IsZoomed(hwnd) != FALSE;
   if (IsIconic(hwnd) || wasMaximized) {
@@ -228,28 +248,28 @@ bool moveWindowToPrimary(HWND hwnd) {
   }
 
   const HMONITOR sourceMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-  if (sourceMonitor != primaryMonitor) {
+  if (sourceMonitor != targetMonitor) {
     MONITORINFO sourceInfo{};
-    MONITORINFO primaryInfo{};
+    MONITORINFO targetInfo{};
     sourceInfo.cbSize = sizeof(sourceInfo);
-    primaryInfo.cbSize = sizeof(primaryInfo);
+    targetInfo.cbSize = sizeof(targetInfo);
     RECT windowRect{};
     if (!GetMonitorInfoW(sourceMonitor, &sourceInfo) ||
-        !GetMonitorInfoW(primaryMonitor, &primaryInfo) ||
+        !GetMonitorInfoW(targetMonitor, &targetInfo) ||
         !GetWindowRect(hwnd, &windowRect)) return false;
 
     const LONG sourceWidth = std::max<LONG>(1, sourceInfo.rcWork.right - sourceInfo.rcWork.left);
     const LONG sourceHeight = std::max<LONG>(1, sourceInfo.rcWork.bottom - sourceInfo.rcWork.top);
-    const LONG targetWidth = primaryInfo.rcWork.right - primaryInfo.rcWork.left;
-    const LONG targetHeight = primaryInfo.rcWork.bottom - primaryInfo.rcWork.top;
+    const LONG targetWidth = targetInfo.rcWork.right - targetInfo.rcWork.left;
+    const LONG targetHeight = targetInfo.rcWork.bottom - targetInfo.rcWork.top;
     const LONG windowWidth = std::min<LONG>(windowRect.right - windowRect.left, targetWidth);
     const LONG windowHeight = std::min<LONG>(windowRect.bottom - windowRect.top, targetHeight);
     const double relativeX = std::clamp(
         static_cast<double>(windowRect.left - sourceInfo.rcWork.left) / sourceWidth, 0.0, 1.0);
     const double relativeY = std::clamp(
         static_cast<double>(windowRect.top - sourceInfo.rcWork.top) / sourceHeight, 0.0, 1.0);
-    const LONG x = primaryInfo.rcWork.left + static_cast<LONG>(relativeX * std::max<LONG>(0, targetWidth - windowWidth));
-    const LONG y = primaryInfo.rcWork.top + static_cast<LONG>(relativeY * std::max<LONG>(0, targetHeight - windowHeight));
+    const LONG x = targetInfo.rcWork.left + static_cast<LONG>(relativeX * std::max<LONG>(0, targetWidth - windowWidth));
+    const LONG y = targetInfo.rcWork.top + static_cast<LONG>(relativeY * std::max<LONG>(0, targetHeight - windowHeight));
 
     if (!SetWindowPos(hwnd, nullptr, x, y, windowWidth, windowHeight,
                       SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER)) return false;
@@ -257,6 +277,26 @@ bool moveWindowToPrimary(HWND hwnd) {
 
   if (wasMaximized) ShowWindowAsync(hwnd, SW_MAXIMIZE);
   return SetForegroundWindow(hwnd) != FALSE;
+}
+
+bool moveWindowToPrimary(HWND hwnd) {
+  HMONITOR primaryMonitor = nullptr;
+  EnumDisplayMonitors(nullptr, nullptr, findPrimaryMonitor, reinterpret_cast<LPARAM>(&primaryMonitor));
+  return moveWindowToMonitor(hwnd, primaryMonitor);
+}
+
+bool moveWindowToDisplayIndex(HWND hwnd, int requestedIndex) {
+  const auto monitors = orderedMonitors();
+  if (monitors.empty()) return false;
+  int targetIndex = requestedIndex;
+  if (targetIndex < 0) {
+    const HMONITOR source = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    const auto current = std::ranges::find(monitors, source);
+    const size_t currentIndex = current == monitors.end() ? 0 : static_cast<size_t>(current - monitors.begin());
+    targetIndex = static_cast<int>((currentIndex + 1) % monitors.size());
+  }
+  if (targetIndex < 0 || static_cast<size_t>(targetIndex) >= monitors.size()) return false;
+  return moveWindowToMonitor(hwnd, monitors[static_cast<size_t>(targetIndex)]);
 }
 
 bool removeAppBar() {
@@ -398,6 +438,15 @@ int main(int argc, char* argv[]) {
     HWND hwnd = nullptr;
     if (!parseHwnd(argv[2], hwnd)) return 2;
     return moveWindowToPrimary(hwnd) ? 0 : 3;
+  }
+  if (argc == 4 && std::string_view(argv[1]) == "--move-display-index") {
+    HWND hwnd = nullptr;
+    if (!parseHwnd(argv[2], hwnd)) return 2;
+    int index = -1;
+    const std::string_view value(argv[3]);
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), index);
+    if (error != std::errc{} || end != value.data() + value.size()) return 2;
+    return moveWindowToDisplayIndex(hwnd, index) ? 0 : 3;
   }
 
   g_mainThreadId = GetCurrentThreadId();

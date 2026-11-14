@@ -127,6 +127,31 @@ export class NativeWindowService extends EventEmitter {
     })
   }
 
+  async moveWindowToDisplay(hwnd: string, displayIndex: number | null): Promise<boolean> {
+    if (!/^\d+$/.test(hwnd) || !this.helperPath) return false
+    const index = displayIndex === null ? -1 : Math.max(0, Math.trunc(displayIndex))
+    return new Promise((resolve) => {
+      const mover = spawn(this.helperPath!, ['--move-display-index', hwnd, String(index)], {
+        windowsHide: true,
+        stdio: 'ignore'
+      })
+      let settled = false
+      let timeout: NodeJS.Timeout | undefined
+      const finish = (result: boolean): void => {
+        if (settled) return
+        settled = true
+        if (timeout) clearTimeout(timeout)
+        resolve(result)
+      }
+      timeout = setTimeout(() => {
+        mover.kill()
+        finish(false)
+      }, 1800)
+      mover.once('error', () => finish(false))
+      mover.once('exit', (code) => finish(code === 0))
+    })
+  }
+
   async restoreWindow(hwnd: string): Promise<boolean> {
     if (!/^\d+$/.test(hwnd)) return false
     const message = await this.request('RESTORE', hwnd)

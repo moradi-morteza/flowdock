@@ -1,9 +1,18 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, screen } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, Notification, screen, Tray } from 'electron'
 import type { MenuItemConstructorOptions, MessageBoxOptions, OpenDialogOptions } from 'electron'
 import { join } from 'node:path'
 import { NativeWindowService } from './native-window-service'
+import { defaultPreferences, PreferencesService } from './preferences-service'
 import { StartupProjectService } from './startup-project-service'
-import type { DesktopWindow, StartupSettings } from '../shared/window'
+import type {
+  DesktopWindow,
+  DisplayInfo,
+  FlowDockPreferences,
+  PomodoroCommand,
+  PomodoroStatus,
+  PreferencesResult,
+  StartupSettings
+} from '../shared/window'
 
 const DEFAULT_WIDTH = 280
 const MIN_WIDTH = 240
@@ -28,6 +37,12 @@ let dockShouldBeVisible = false
 let appBarUpdateTimer: NodeJS.Timeout | null = null
 let isQuitting = false
 let startupProjects: StartupProjectService | null = null
+let preferencesService: PreferencesService | null = null
+let preferences: FlowDockPreferences = structuredClone(defaultPreferences)
+let preferencesError: string | null = null
+let tray: Tray | null = null
+let trayLanguage: 'en' | 'fa' = 'en'
+let pomodoroStatus: PomodoroStatus = { active: false, running: false, remainingSeconds: 0, taskTitle: null }
 const windows = new NativeWindowService()
 
 interface LoginItemIdentity {
@@ -113,11 +128,33 @@ function nativeHandleString(window: BrowserWindow): string {
 }
 
 function getDockDisplay(): Electron.Display {
+  if (preferences.dockDisplayMode === 'primary') {
+    const primary = screen.getPrimaryDisplay()
+    dockDisplayId = primary.id
+    return primary
+  }
+  if (preferences.dockDisplayMode === 'fixed' && preferences.fixedDisplayId !== null) {
+    const fixed = screen.getAllDisplays().find((display) => display.id === preferences.fixedDisplayId)
+    if (fixed) {
+      dockDisplayId = fixed.id
+      return fixed
+    }
+  }
   const current = screen.getAllDisplays().find((display) => display.id === dockDisplayId)
   if (current) return current
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
   dockDisplayId = display.id
   return display
+}
+
+function selectDockDisplayForShow(): void {
+  if (preferences.dockDisplayMode === 'cursor') {
+    dockDisplayId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
+  } else if (preferences.dockDisplayMode === 'primary') {
+    dockDisplayId = screen.getPrimaryDisplay().id
+  } else {
+    dockDisplayId = preferences.fixedDisplayId
+  }
 }
 
 function reserveDockSpace(bounds: Electron.Rectangle): void {
@@ -161,6 +198,7 @@ function hideDock(): void {
     appBarUpdateTimer = null
   }
   dock.hide()
+  rebuildTrayMenu()
   void windows.removeAppBar().catch((error: unknown) => {
     console.error('[appbar] unable to release desktop work area', error)
   })
@@ -177,23 +215,179 @@ function toggleDock(): void {
   if (dock.isVisible()) {
     hideDock()
   } else {
-    dockDisplayId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
-    dockShouldBeVisible = true
-    positionDock()
-    dock.show()
-    dock.focus()
-    dock.webContents.send('flowdock:focus-search')
+    showDock()
   }
 }
 
-function showDockOnCursorDisplay(): void {
+function showDock(): void {
   if (!dock) return
-  dockDisplayId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
+  selectDockDisplayForShow()
   dockShouldBeVisible = true
   positionDock()
   dock.show()
   dock.focus()
   dock.webContents.send('flowdock:focus-search')
+  rebuildTrayMenu()
+}
+
+function sendPomodoroCommand(command: PomodoroCommand): void {
+  if (!dock) return
+  if (dock.webContents.isLoading()) {
+    dock.webContents.once('did-finish-load', () => dock?.webContents.send('flowdock:pomodoro-command', command))
+  } else {
+    dock.webContents.send('flowdock:pomodoro-command', command)
+  }
+}
+
+function trayText(english: string, persian: string): string {
+  return trayLanguage === 'fa' ? persian : english
+}
+
+function rebuildTrayMenu(): void {
+  if (!tray) return
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: dock?.isVisible()
+        ? trayText('Hide FlowDock', 'مخفی‌کردن فلو‌داک')
+        : trayText('Show FlowDock', 'نمایش فلو‌داک'),
+      click: toggleDock
+    },
+    { type: 'separator' },
+    {
+      label: trayText('Pause Pomodoro', 'توقف پومودورو'),
+      enabled: pomodoroStatus.active && pomodoroStatus.running,
+      click: () => sendPomodoroCommand('pause')
+    },
+    {
+      label: trayText('Start Focus', 'شروع تمرکز'),
+      click: () => sendPomodoroCommand('start-focus')
+    },
+    { type: 'separator' },
+    {
+      label: trayText('Quit FlowDock', 'خروج از فلو‌داک'),
+      click: () => void quitFlowDock()
+    }
+  ]))
+}
+
+async function createTray(): Promise<void> {
+  try {
+    const icon = await app.getFileIcon(process.execPath, { size: 'small' })
+    tray = new Tray(icon.resize({ width: 16, height: 16 }))
+    tray.setToolTip('FlowDock')
+    tray.on('click', toggleDock)
+    rebuildTrayMenu()
+  } catch (error) {
+    console.error('[tray] unable to create system tray icon', error)
+  }
+}
+
+async function quitFlowDock(): Promise<void> {
+  isQuitting = true
+  dockShouldBeVisible = false
+  try {
+    await windows.removeAppBar()
+  } catch (error) {
+    console.warn('[appbar] unable to release before quit', error)
+  }
+  app.quit()
+}
+
+function displayOptions(): DisplayInfo[] {
+  const primaryId = screen.getPrimaryDisplay().id
+  return screen.getAllDisplays().map((display, index) => ({
+    id: display.id,
+    label: display.label || `Monitor ${index + 1}`,
+    primary: display.id === primaryId
+  }))
+}
+
+async function activateNextWindow(): Promise<void> {
+  const snapshot = windows.getSnapshot()
+  if (snapshot.windows.length === 0) return
+  const currentIndex = snapshot.windows.findIndex((item) => item.hwnd === snapshot.activeHwnd)
+  const nextIndex = (currentIndex + 1 + snapshot.windows.length) % snapshot.windows.length
+  await windows.activateWindow(snapshot.windows[nextIndex].hwnd)
+}
+
+async function moveActiveWindow(): Promise<void> {
+  const snapshot = windows.getSnapshot()
+  const active = snapshot.windows.find((item) => item.hwnd === snapshot.activeHwnd)
+  if (!active) return
+  const displays = [...screen.getAllDisplays()].sort((left, right) =>
+    left.bounds.x === right.bounds.x ? left.bounds.y - right.bounds.y : left.bounds.x - right.bounds.x
+  )
+  if (displays.length < 2) return
+
+  let target = preferences.targetDisplayId === null
+    ? null
+    : displays.find((display) => display.id === preferences.targetDisplayId) ?? null
+  if (!target) {
+    const currentNumber = Number(active.monitorDevice.match(/DISPLAY(\d+)$/i)?.[1] ?? '1') - 1
+    target = displays[(Math.max(0, currentNumber) + 1) % displays.length]
+  }
+  const targetIndex = preferences.targetDisplayId === null
+    ? null
+    : displays.findIndex((display) => display.id === target?.id)
+  await windows.moveWindowToDisplay(active.hwnd, targetIndex !== null && targetIndex >= 0 ? targetIndex : null)
+}
+
+const shortcutActions: Record<keyof FlowDockPreferences['shortcuts'], () => void> = {
+  toggleDock,
+  togglePomodoro: () => sendPomodoroCommand('toggle'),
+  nextWindow: () => void activateNextWindow(),
+  moveWindow: () => void moveActiveWindow()
+}
+
+function registerShortcuts(candidate: FlowDockPreferences): string | null {
+  globalShortcut.unregisterAll()
+  const registered = new Set<string>()
+  try {
+    for (const [name, accelerator] of Object.entries(candidate.shortcuts) as Array<[
+      keyof FlowDockPreferences['shortcuts'], string
+    ]>) {
+      if (!accelerator) continue
+      const normalized = accelerator.toLocaleLowerCase()
+      if (registered.has(normalized)) throw new Error(`Shortcut ${accelerator} is assigned more than once.`)
+      if (!globalShortcut.register(accelerator, shortcutActions[name])) {
+        throw new Error(`Shortcut ${accelerator} is unavailable or already used by another application.`)
+      }
+      registered.add(normalized)
+    }
+    return null
+  } catch (error) {
+    globalShortcut.unregisterAll()
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
+function currentPreferencesResult(): PreferencesResult {
+  return { preferences: structuredClone(preferences), error: preferencesError }
+}
+
+async function updatePreferences(candidate: FlowDockPreferences): Promise<PreferencesResult> {
+  if (!preferencesService) return currentPreferencesResult()
+  const previous = preferences
+  const registrationError = registerShortcuts(candidate)
+  if (registrationError) {
+    preferencesError = registrationError
+    registerShortcuts(previous)
+    return currentPreferencesResult()
+  }
+  try {
+    preferences = await preferencesService.save(candidate)
+    preferencesError = null
+    if (dockShouldBeVisible) {
+      selectDockDisplayForShow()
+      positionDock(false)
+      scheduleDockReservation(0)
+    }
+  } catch (error) {
+    preferences = previous
+    registerShortcuts(previous)
+    preferencesError = error instanceof Error ? error.message : String(error)
+  }
+  return currentPreferencesResult()
 }
 
 function isProjectApplication(processName: string): boolean {
@@ -308,7 +502,8 @@ function createDock(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false
     }
   })
 
@@ -331,10 +526,11 @@ function createDock(): void {
 
   dock.once('ready-to-show', () => {
     if (!dock) return
-    dockDisplayId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
+    selectDockDisplayForShow()
     dockShouldBeVisible = true
     positionDock()
     dock.show()
+    rebuildTrayMenu()
   })
 }
 
@@ -344,7 +540,7 @@ if (!hasSingleInstanceLock) {
 
 app.on('second-instance', () => {
   if (!dock) return
-  showDockOnCursorDisplay()
+  showDock()
 })
 
 app.whenReady().then(async () => {
@@ -355,17 +551,20 @@ app.whenReady().then(async () => {
     join(app.getPath('appData'), 'JetBrains'),
     app.getPath('home')
   )
+  preferencesService = new PreferencesService(join(app.getPath('userData'), 'preferences.json'))
+  await preferencesService.load()
+  preferences = preferencesService.get()
   await startupProjects.load()
   migrateLegacyStartupSetting()
   createDock()
+  await createTray()
 
   if (process.argv.includes(STARTUP_ARGUMENT)) {
     setTimeout(() => void startupProjects?.launchAll(windows.getSnapshot()), 2500)
   }
 
-  if (!globalShortcut.register('Control+Alt+Space', toggleDock)) {
-    console.error('[shortcut] Control+Alt+Space could not be registered')
-  }
+  preferencesError = registerShortcuts(preferences)
+  if (preferencesError) console.error('[shortcut]', preferencesError)
   screen.on('display-metrics-changed', () => {
     if (!dockShouldBeVisible) return
     positionDock(false)
@@ -416,6 +615,39 @@ ipcMain.handle('flowdock:set-startup-enabled', (_, enabled: unknown) => {
   if (typeof enabled !== 'boolean') return readStartupSettings()
   return setStartupEnabled(enabled)
 })
+ipcMain.handle('flowdock:get-preferences', currentPreferencesResult)
+ipcMain.handle('flowdock:set-preferences', (_, candidate: unknown) => {
+  if (!candidate || typeof candidate !== 'object' || !('shortcuts' in candidate)) return currentPreferencesResult()
+  return updatePreferences(candidate as FlowDockPreferences)
+})
+ipcMain.handle('flowdock:get-displays', displayOptions)
+ipcMain.handle('flowdock:quit', () => quitFlowDock())
+ipcMain.handle('flowdock:show-notification', (_, title: unknown, body: unknown) => {
+  if (typeof title !== 'string' || typeof body !== 'string' || !Notification.isSupported()) return false
+  const notification = new Notification({
+    title: title.slice(0, 80),
+    body: body.slice(0, 240),
+    silent: false
+  })
+  notification.on('click', showDock)
+  notification.show()
+  return true
+})
+ipcMain.handle('flowdock:update-pomodoro-status', (_, status: unknown) => {
+  if (!status || typeof status !== 'object') return
+  const input = status as Partial<PomodoroStatus>
+  pomodoroStatus = {
+    active: input.active === true,
+    running: input.running === true,
+    remainingSeconds: typeof input.remainingSeconds === 'number' ? Math.max(0, input.remainingSeconds) : 0,
+    taskTitle: typeof input.taskTitle === 'string' ? input.taskTitle : null
+  }
+  rebuildTrayMenu()
+})
+ipcMain.handle('flowdock:set-language', (_, language: unknown) => {
+  trayLanguage = language === 'fa' ? 'fa' : 'en'
+  rebuildTrayMenu()
+})
 ipcMain.handle('flowdock:show-window-menu', (_, hwnd: unknown) => {
   if (typeof hwnd !== 'string') return false
   return showWindowMenu(hwnd)
@@ -428,6 +660,8 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   if (appBarUpdateTimer) clearTimeout(appBarUpdateTimer)
   globalShortcut.unregisterAll()
+  tray?.destroy()
+  tray = null
   void windows.stop()
 })
 
